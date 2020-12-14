@@ -166,4 +166,5 @@ https://pjreddie.com/yolo/.
 2. nms --> soft nms  只在detect.py用到了
 3. 将CBL --> CBM
 4. model的最上面加了swish
+5. 强制覆盖远程仓库
 
