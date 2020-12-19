@@ -20,20 +20,21 @@ from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.ticker import NullLocator
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_folder", type=str, default="data/face/test", help="path to dataset")
     parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file")
-    parser.add_argument("--weights_path", type=str, default="checkpoints/yolov3_ckpt_150.pth", help="path to weights file")
+    # parser.add_argument("--weights_path", type=str, default="weights/yolov3.weights", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/face/class.names", help="path to class label file")
-    parser.add_argument("--conf_thres", type=float, default=0.8, help="object confidence threshold")
-    parser.add_argument("--nms_thres", type=float, default=0.4, help="iou thresshold for non-maximum suppression")
+    parser.add_argument("--conf_thres", type=float, default=0.7, help="object confidence threshold")
+    parser.add_argument("--nms_thres", type=float, default=0.3, help="iou thresshold for non-maximum suppression")
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
-    parser.add_argument("--n_cpu", type=int, default=0, help="number of cpu threads to use during batch generation")
+    parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
     parser.add_argument("--img_size", type=int, default=800, help="size of each image dimension")
-    # parser.add_argument("--checkpoint_model", type=str, default="checkpoints/yolov3_ckpt_150.pth", help="path to checkpoint model")
+    parser.add_argument("--weights_path", type=str, default="checkpoints/yolov3_ckpt_150.pth", help="path to checkpoint model")
     opt = parser.parse_args()
     print(opt)
 
@@ -43,13 +44,15 @@ if __name__ == "__main__":
 
     # Set up model
     model = Darknet(opt.model_def, img_size=opt.img_size).to(device)
+    # 需要使用并行就加上这句，要是单卡就注掉这句
+    # model = nn.DataParallel(model)
 
     if opt.weights_path.endswith(".weights"):
         # Load darknet weights
         model.load_darknet_weights(opt.weights_path)
     else:
         # Load checkpoint weights
-        model.load_state_dict(torch.load(opt.weights_path, map_location='cpu'))
+        model.load_state_dict(torch.load(opt.weights_path))
 
     model.eval()  # Set in evaluation mode
 
@@ -137,6 +140,6 @@ if __name__ == "__main__":
         plt.axis("off")
         plt.gca().xaxis.set_major_locator(NullLocator())
         plt.gca().yaxis.set_major_locator(NullLocator())
-        filename = path.split("\\")[-1].split(".")[0]
+        filename = path.split("/")[-1].split(".")[0]
         plt.savefig(f"output/{filename}.png", bbox_inches="tight", pad_inches=0.0)
         plt.close()

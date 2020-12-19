@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 from __future__ import division
 
 import torch
@@ -151,7 +152,25 @@ class YOLOLayer(nn.Module):
         # l_conf = obj_scale*l_obj + noobj_scale * l_noobj
         self.obj_scale = 1                  # lambda们
         self.noobj_scale = 100
-        self.metrics = {}                   # 一堆计算变量
+        # self.metrics = {}                   # 一堆计算变量
+        self.metrics = {
+            "loss": 0,
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0,
+            "conf": 0,
+            "cls": 0,
+            "cls_acc": 0,
+            "recall50": 0,
+            "recall75": 0,
+            "precision": 0,
+            "conf_obj": 0,
+            "conf_noobj": 0,
+            "grid_size": 0,
+        }
+        self.metrics_init = False
+
         self.img_dim = img_dim              # 图像大小，416
         self.grid_size = 0  # grid size     # 13x13=>32, 26x26=>16, 52x52=>8
 
@@ -352,22 +371,24 @@ class YOLOLayer(nn.Module):
             recall50 = torch.sum(iou50 * detected_mask) / (obj_mask.sum() + 1e-16)
             recall75 = torch.sum(iou75 * detected_mask) / (obj_mask.sum() + 1e-16)
 
-            self.metrics = {
-                "loss": to_cpu(total_loss).item(),
-                "x": to_cpu(loss_x).item(),
-                "y": to_cpu(loss_y).item(),
-                "w": to_cpu(loss_w).item(),
-                "h": to_cpu(loss_h).item(),
-                "conf": to_cpu(loss_conf).item(),
-                "cls": to_cpu(loss_cls).item(),
-                "cls_acc": to_cpu(cls_acc).item(),
-                "recall50": to_cpu(recall50).item(),
-                "recall75": to_cpu(recall75).item(),
-                "precision": to_cpu(precision).item(),
-                "conf_obj": to_cpu(conf_obj).item(),
-                "conf_noobj": to_cpu(conf_noobj).item(),
-                "grid_size": grid_size,
-            }
+            self.metrics["loss"] += total_loss.item()
+            self.metrics["x"] += loss_x.item()
+            self.metrics["y"] += loss_y.item()
+            self.metrics["w"] += loss_w.item()
+            self.metrics["h"] += loss_h.item()
+            self.metrics["conf"] += loss_conf.item()
+            self.metrics["cls"] += loss_cls.item()
+            self.metrics["cls_acc"] += cls_acc.item()
+            self.metrics["recall50"] += recall50.item()
+            self.metrics["recall75"] += recall75.item()
+            self.metrics["precision"] += precision.item()
+            self.metrics["conf_obj"] += conf_obj.item()
+            self.metrics["conf_noobj"] += conf_noobj.item()
+            self.metrics["grid_size"] += grid_size
+            self.metrics_init = True
+            if self.metrics:
+                for k, v in self.metrics.items():
+                    self.metrics[k] = v / 2
 
             return output, total_loss
 
@@ -415,7 +436,13 @@ class Darknet(nn.Module):
                 yolo_outputs.append(x)
             layer_outputs.append(x)
         yolo_outputs = to_cpu(torch.cat(yolo_outputs, 1))
-        return yolo_outputs if targets is None else (loss, yolo_outputs)
+        if loss == 0:
+            loss_ = loss
+        else:
+            loss_ = loss.type(torch.cuda.FloatTensor)
+        yolo_outputs_gpu = yolo_outputs.cuda()
+
+        return yolo_outputs_gpu if targets is None else (loss_, yolo_outputs_gpu)
 
     def load_darknet_weights(self, weights_path):
         """Parses and loads the weights stored in 'weights_path'"""

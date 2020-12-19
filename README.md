@@ -158,19 +158,4 @@ https://pjreddie.com/yolo/.
   year={2018}
 }
 ```
-
-# 2020年12月11新增
-1. 针对CIOU等一系列的理解:
-真实框和预测框之间的IOU，对应修改utils --> 460行
-我本来觉得是修改loss，但是这边是算的掩膜和object之间的mse
-2. nms --> soft nms  只在detect.py用到了
-3. 将CBL --> CBM
-4. model的最上面加了swish
-5. 强制覆盖远程仓库
-
-
-2020年12月15
-1. 将自己训练好的模型转化成darknet的格式
-
-2020年12月17
-支持多卡训练
+hhhhhh

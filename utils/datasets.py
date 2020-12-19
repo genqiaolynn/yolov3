@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 import glob
 import random
 import os, cv2
@@ -242,7 +243,7 @@ class ListDataset(Dataset):
 
         return img_path, img, targets
 
-    def collate_fn(self, batch):
+    def collate_fn_raw(self, batch):
         paths, imgs, targets = list(zip(*batch))
         # Remove empty placeholder targets
         targets = [boxes for boxes in targets if boxes is not None]
@@ -254,6 +255,29 @@ class ListDataset(Dataset):
         if self.multiscale and self.batch_count % 10 == 0:
             self.img_size = random.choice(range(self.min_size, self.max_size + 1, 32))
         # Resize images to input shape
+        imgs = torch.stack([resize(img, self.img_size) for img in imgs])
+        self.batch_count += 1
+        return paths, imgs, targets
+
+    def collate_fn(self, batch):
+        paths, imgs, targets = list(zip(*batch))
+        targets = [boxes for boxes in targets if boxes is not None]
+        max_targets = max([targets[i].size(0) for i in range(len(targets))])
+        padded_targets = list()
+
+        for i, boxes in enumerate(targets):
+            if boxes is not None:
+                boxes[:, 0] = i
+                absent = max_targets - boxes.size(0)
+                if absent > 0:
+                    boxes = torch.cat((boxes, torch.zeros((absent, 6))), 0)
+                padded_targets.append(boxes)
+        targets = [boxes for boxes in padded_targets]
+        targets = torch.cat(targets, 0)
+        # select new image size every 10 batch
+        if self.multiscale and self.batch_count % 10 == 0:
+            self.img_size = random.choice(range(self.min_size, self.max_size + 1, 32))
+        # resize image(pad-to-square) to new size
         imgs = torch.stack([resize(img, self.img_size) for img in imgs])
         self.batch_count += 1
         return paths, imgs, targets
