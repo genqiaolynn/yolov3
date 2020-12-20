@@ -23,14 +23,14 @@ from torchvision import datasets
 from torchvision import transforms
 from torch.autograd import Variable
 import torch.optim as optim
-
+from config.config import cfg
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=1000, help="number of epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="size of each image batch")
+    parser.add_argument("--batch_size", type=int, default=cfg.batch_size, help="size of each image batch")
     parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")
     parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file")
     parser.add_argument("--data_config", type=str, default="data/face/class.data", help="path to data config file")
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_interval", type=int, default=10, help="interval between saving model weights")
     parser.add_argument("--evaluation_interval", type=int, default=10, help="interval evaluations on validation set")
     parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")
-    parser.add_argument("--n_gpu", type=str, default='0,1', help="allow for multi-scale training")
+    parser.add_argument("--n_gpu", type=str, default=cfg.n_gpu, help="GPU IDS")
     parser.add_argument("--multiscale_training", default=False, help="allow for multi-scale training")
     opt = parser.parse_args()
     print(opt)

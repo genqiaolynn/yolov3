@@ -671,7 +671,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     th = FloatTensor(nB, nA, nG, nG).fill_(0)
     tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
 
-    target  = target[target.sum(dim=1) != 0]
+    target = target[target.sum(dim=1) != 0]
 
     # Convert to position relative to box
     target_boxes = target[:, 2:6] * nG
@@ -682,12 +682,10 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     best_ious, best_n = ious.max(0)
     # Separate target values
     b, target_labels = target[:, :2].long().t()
-    # n_gpus = len(n_gpu.split(','))
-    # img_cnt_per_gpu = int(batch_size/n_gpus)
-    n_gpus = 2
-    img_cnt_per_gpu = 2
+    n_gpus = len(cfg.n_gpu.split(','))
+    img_cnt_per_gpu = int(cfg.batch_size/n_gpus)
 
-    b = b%img_cnt_per_gpu
+    b = b % img_cnt_per_gpu
 
     gx, gy = gxy.t()
     gw, gh = gwh.t()
