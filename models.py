@@ -45,7 +45,7 @@ def create_modules(module_defs):
     # nn.ModuleList(): 就是Module的list，并没有实现forward函数(并没有实际执行的函数)，所以只是module的list，并不需要module之间的顺序关系
     # nn.Sequential(): module的顺序执行。是实现了forward函数的，即会顺序执行其中的module，所以每个module的size必须匹配
     # 说的不错的链接：https://blog.csdn.net/watermelon1123/article/details/89954224
-    #              https://zhuanlan.zhihu.com/p/64990232
+    #               https://zhuanlan.zhihu.com/p/64990232
     for module_i, module_def in enumerate(module_defs):
         modules = nn.Sequential()   # 存下每一大层的执行，如conv层: 包括conv-bn-leaky relu等
         if module_def["type"] == "convolutional":
@@ -83,12 +83,12 @@ def create_modules(module_defs):
             upsample = Upsample(scale_factor=int(module_def["stride"]), mode="nearest")
             modules.add_module(f"upsample_{module_i}", upsample)
 
-        elif module_def["type"] == "route":
+        elif module_def["type"] == "route":        # route执行的是融合操作
             layers = [int(x) for x in module_def["layers"].split(",")]
             filters = sum([output_filters[1:][i] for i in layers])  # channel个数相加，对应concat
             modules.add_module(f"route_{module_i}", EmptyLayer())
 
-        elif module_def["type"] == "shortcut":
+        elif module_def["type"] == "shortcut":     # shortcut执行的是add操作
             filters = output_filters[1:][int(module_def["from"])]
             modules.add_module(f"shortcut_{module_i}", EmptyLayer())
 
@@ -405,9 +405,10 @@ class Darknet(nn.Module):
         self.module_defs = parse_model_config(config_path)      # read in cfg where net is defined
         # hyperparams: {"type":"net", "channels":3, ...}
         # module_list: 每个layer-block的顺序执行（不包含module_defs[0](也就是[net]layer的，那层是hyperparams)）
-        #      create_modules中，为提取hyperparams，已pop出hyper，所以module_defs此时已无[net]module
+        # create_modules中，为提取hyperparams，已pop出hyper，所以module_defs此时已无[net]module
         self.hyperparams, self.module_list = create_modules(self.module_defs)
         self.yolo_layers = [layer[0] for layer in self.module_list if hasattr(layer[0], "metrics")]   # not used
+        #  if hasattr()  如果对象有该属性返回 True，否则返回 False。
         self.img_size = img_size
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)

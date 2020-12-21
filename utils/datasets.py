@@ -13,12 +13,23 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
 
+img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif']
+
+
 def pad_to_square(img, pad_value):
     c, h, w = img.shape
     dim_diff = np.abs(h - w)
     # (upper / left) padding and (lower / right) padding
     pad1, pad2 = dim_diff // 2, dim_diff - dim_diff // 2
     # Determine padding
+    # 关于torch.nn.functional.pad()函数的理解：
+    # padding（int, tuple）：指定填充的大小。如果是一个整数值a，则所有边界都使用相同的填充数，等价于输入(a,a,a,a)。
+    # 如果是大小为4的元组，则表示 (padding_leftpadding_left, padding_rightpadding_right,
+    # padding_toppadding_top, padding_bottompadding_bottom)
+    # 简单来说: (a, a, a, a) = (left, right, top, bottom)  w = left+right h = top + bottom
+    # 如果图像的宽>高，说明高需要补0，则(0,0,pad1,pad2)
+    # 反之，如果图像的宽<高，说明宽需要补0，则(pad1,pad2, 0,0)
+    # 补的pad1+pad2就是宽和高相差的大小，始终能保证是个正方形。目前还不清楚为什么需要将图像补成一个正方形
     pad = (0, 0, pad1, pad2) if h <= w else (pad1, pad2, 0, 0)
     # Add padding
     img = F.pad(img, pad, "constant", value=pad_value)
@@ -160,12 +171,12 @@ class ImageFolder(Dataset):
 class ListDataset(Dataset):
     def __init__(self, list_path, img_size=416, augment=True, multiscale=True, normalized_labels=True):
         with open(list_path, "r") as file:
-            self.img_files = file.readlines()
+            # self.img_files = file.readlines()   # raw
+            self.img_files = [x.replace('/', os.sep) for x in file.read().splitlines() if os.path.splitext(x)[-1] in img_formats]
+        # self.label_files = [path.replace("images", "labels").replace(".png", ".txt").replace(".jpg", ".txt")
+        #                     for path in self.img_files]   # raw
+        self.label_files = [path.replace('images', 'labels').replace(os.path.splitext(path)[-1], '.txt') for path in self.img_files]
 
-        self.label_files = [
-            path.replace("images", "labels").replace(".png", ".txt").replace(".jpg", ".txt")
-            for path in self.img_files
-        ]
         self.img_size = img_size
         self.max_objects = 100
         self.augment = augment
