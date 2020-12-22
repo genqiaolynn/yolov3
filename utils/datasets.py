@@ -30,6 +30,7 @@ def pad_to_square(img, pad_value):
     # 如果图像的宽>高，说明高需要补0，则(0,0,pad1,pad2)
     # 反之，如果图像的宽<高，说明宽需要补0，则(pad1,pad2, 0,0)
     # 补的pad1+pad2就是宽和高相差的大小，始终能保证是个正方形。目前还不清楚为什么需要将图像补成一个正方形
+    # 左，右，上，下进行pad操作。h>w,做左右pad；h<w,做上下pad
     pad = (0, 0, pad1, pad2) if h <= w else (pad1, pad2, 0, 0)
     # Add padding
     img = F.pad(img, pad, "constant", value=pad_value)
@@ -250,6 +251,8 @@ class ListDataset(Dataset):
         # Apply augmentations
         if self.augment:
             if np.random.random() < 0.5:
+                # 这里的targets是个N行6列的数组
+                # 来源是第0列的标签列不管，第1到5列是cls和box的大小，这时候的box是pad之后的中心点坐标加宽高
                 img, targets = horisontal_flip(img, targets)
 
         return img_path, img, targets

@@ -179,8 +179,10 @@ class YOLOLayer(nn.Module):
         self.grid_size = grid_size
         g = self.grid_size          # 13, 26, 52
         FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+        # 图片从网络输入到YOLO层时缩小的倍数 标准YOLOv3有三个YOLO层,所以有三个stride 32, 16, 8
         self.stride = self.img_dim / self.grid_size     # 32, 16, 8 => pixels per grid/feature point represents
         # Calculate offsets for each grid
+        # 这里的self.grid_x与self.grid_y只是表示每个grid的左上角坐标,方便后面相加
         self.grid_x = torch.arange(g).repeat(g, 1).view([1, 1, g, g]).type(FloatTensor)
         # torch.arange(g): tensor([0,1,2,...,12])
         # torch.arange(g).repeat(g, 1):
@@ -196,6 +198,7 @@ class YOLOLayer(nn.Module):
         #                 [0,1,2,...,12]]]])
         #       shape=torch.Size([1, 1, 13, 13])
         # todo: 关于 repeat (不是todo，就是为了这个颜色)
+        # 这里torch.repeat()解释很合理
         # torch.repeat(m): 在第0维重复m次
         #                  此处如果只用.repeat(g),则会出现[0,1,...,12,0,1,...12,...,0,1,...12]
         # torch.repeat(m, n): 在第0维重复m次，在第1维重复n次
@@ -211,6 +214,7 @@ class YOLOLayer(nn.Module):
         # FloatTensor()后会将里面的tuple()变成[]
         # 将anchor变到(0, 13)范围内
         # self.scaled_anchors = tensor([[3.625, 2.8125], [4.875, 6.1875], [11.65625, 10.1875]]) # 3x2
+        # 由于最终的xywh都会在以stride为单位的featuremap上预测计算,所以这里anchors的尺寸也要跟着改变(缩小),变到(0, 13)的范围内
         self.anchor_w = self.scaled_anchors[:, 0:1].view((1, self.num_anchors, 1, 1))
         # self.scaled_anchors[:, :1]: tensor([[3.625], [4.8750], [11.6562]])
         # self.anchor_w =
@@ -254,7 +258,8 @@ class YOLOLayer(nn.Module):
         w = prediction[..., 2]  # Width                     # (b,3,13,13)            # 1 +
         h = prediction[..., 3]  # Height                    # (b,3,13,13)            # 1 +
         pred_conf = torch.sigmoid(prediction[..., 4])  # Conf (b,3,13,13)            # 1 + = 5 +
-        pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred. (b,3,13,13,80)    # 80 = 85
+        # pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred. (b,3,13,13,80)    # 80 = 85   # raw
+        pred_cls = torch.softmax(prediction[..., 5:], dim=1)  # Cls pred. (b,3,13,13,80)    # 80 = 85
         # 关于这里的损失函数，要是不是互斥的可以用softmax，例如不存在狗，哈士奇这样的class就可以用softmax
 
         # Initially, self.grid_size = 0 != 13, then 13 != 26, then 26 != 52
@@ -289,13 +294,16 @@ class YOLOLayer(nn.Module):
         # 所以xy+grid_xy就是将pred结果(即物体中心点, slides中蓝色bx, by的部分)分布到每个grid中去，(0, 13)
         #
         # 对于wh，由于prediction的结果直接是log()后的(如果忘记，请回看slides：同样也对应蓝色bw,bh的部分)，所以此处要exp
-        #
         # 此时，所有pred_boxes都是（0,13）范围的
         # These preds are final outpus for test/inference which corresponds to the blue circle in slides
         # This procedure could also be called as Decode
         #
         # 通常情况下，单纯的preds并不参与loss的计算，而只是作为最终的输出存在，
         # 但是这里依然计算，并在build_targets函数中出现，其目的，在于协助产生mask
+
+        # 这里为什要乘以压缩(32, 16, 8)倍后的anchor而不是原anchor的wh,
+        # 因为pred_boxes中的wh值也都是在压缩(32, 16, 8)倍的环境下预测出来的.
+        # 主要是为了保持一致,虽然马上就又恢复到正常大小了 (下面cat内容)
         pred_boxes = FloatTensor(prediction[..., :4].shape)     # (b, 3, 13, 13, 4)
         pred_boxes[..., 0] = x.data + self.grid_x
         pred_boxes[..., 1] = y.data + self.grid_y
@@ -304,6 +312,9 @@ class YOLOLayer(nn.Module):
 
         output = torch.cat(
             (   # * stride(=32对于13x13)，目的是将(0, 13)的bbox恢复到(0, 416)
+                # 这里的 -1 指的是 num_anchors*grid_size*grid_size
+                # 即最终output shape -> (batch_size,num_anchors*grid_size*grid_size,self.num_classes + 5)
+                # 这里的pred_boxes数据格式为 xywh在图片中的的相对大小 (0,1)
                 pred_boxes.view(num_samples, -1, 4) * self.stride,
                 pred_conf.view(num_samples, -1, 1),
                 pred_cls.view(num_samples, -1, self.num_classes),
@@ -315,7 +326,7 @@ class YOLOLayer(nn.Module):
             return output, 0
         else:
             # iou_scores: [b, num_anchor, grid_size, grid_size] -> pred_boxes与ground_truth的IoU
-            # class_mask: [b, num_anchor, grid_size, grid_size], 预测正确的class 为true
+            # class_mask: [b, num_anchor, grid_size, grid_size] -> 预测正确的class 为true
             # obj_mask : [b, num_anchor, grid_size, grid_size] -> 1: 一定是正样本落在的地方(b_id, anchor_id, i, j)
             #                                                  -> 0: 一定不是正样本落在的地方
             # noobj_mask:  [b, num_anchor, grid_size, grid_size] -> 1: 一定是负样本落在的地方
@@ -422,10 +433,10 @@ class Darknet(nn.Module):
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module(x)   # conv(-batch-leakyrelu)非yolo之前的
             elif module_def["type"] == "route":
-                #              layer_outputs就是每个module block的输出
+                # layer_outputs就是每个module block的输出
                 x = torch.cat([layer_outputs[int(layer_i)] for layer_i in module_def["layers"].split(",")], 1)
             elif module_def["type"] == "shortcut":
-                layer_i = int(module_def["from"])
+                layer_i = int(module_def["from"])   # shortcut那层加了一个linear activation，并没有起到实质性的作用
                 x = layer_outputs[-1] + layer_outputs[layer_i]  # element-wise addition
             elif module_def["type"] == "yolo":
                 # module[0] here: YOLOLayer.forward
@@ -437,13 +448,16 @@ class Darknet(nn.Module):
                 yolo_outputs.append(x)
             layer_outputs.append(x)
         yolo_outputs = to_cpu(torch.cat(yolo_outputs, 1))
-        if loss == 0:
-            loss_ = loss
-        else:
-            loss_ = loss.type(torch.cuda.FloatTensor)
-        yolo_outputs_gpu = yolo_outputs.cuda()
+        # TODO GPU
+        # if loss == 0:
+        #     loss_ = loss
+        # else:
+        #     loss_ = loss.type(torch.cuda.FloatTensor)
+        # yolo_outputs_gpu = yolo_outputs.cuda()
+        # return yolo_outputs_gpu if targets is None else (loss_, yolo_outputs_gpu)
 
-        return yolo_outputs_gpu if targets is None else (loss_, yolo_outputs_gpu)
+        # TODO CPU
+        return yolo_outputs if targets is None else (loss, yolo_outputs)
 
     def load_darknet_weights(self, weights_path):
         """Parses and loads the weights stored in 'weights_path'"""

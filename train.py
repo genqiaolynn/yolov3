@@ -38,7 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--pretrained_weights", type=str, default="weights/yolov3.weights",
                         help="if specified starts from checkpoint model")
     parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-    parser.add_argument("--img_size", type=int, default=800, help="size of each image dimension")
+    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
     parser.add_argument("--checkpoint_interval", type=int, default=10, help="interval between saving model weights")
     parser.add_argument("--evaluation_interval", type=int, default=10, help="interval evaluations on validation set")
     parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")
@@ -74,7 +74,8 @@ if __name__ == "__main__":
 
     model = nn.DataParallel(model)
 
-    # Get dataloader
+    # Get dataloader   dataloader的大小就是一个batch里的图像向上取整之后的个数
+    # len(dataloader) = math.ceil(len(img_files)/batch_size)
     dataset = ListDataset(train_path, img_size=opt.img_size, augment=True, multiscale=opt.multiscale_training)
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -110,6 +111,7 @@ if __name__ == "__main__":
         end_train = 0
 
         for batch_i, (_, imgs, targets) in enumerate(dataloader):
+            # (_, imgs, targets) 具体返回的是: img_path, img, targets
             if batch_i == len(dataloader)-1:
                 break
             batches_done = len(dataloader) * epoch + batch_i
@@ -123,7 +125,7 @@ if __name__ == "__main__":
                 optimizer.step()
                 optimizer.zero_grad()
 
-            if (batch_i+1)%100 == 0:
+            if (batch_i+1) % 100 == 0:
                 log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----\n" % (epoch, opt.epochs, batch_i, len(dataloader))
 
                 metric_table = [["Metrics", *[f"YOLO Layer {i}" for i in range(len(model.module.yolo_layers))]]]
