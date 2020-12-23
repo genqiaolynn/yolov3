@@ -274,20 +274,23 @@ class ListDataset(Dataset):
         return paths, imgs, targets
 
     def collate_fn(self, batch):
-        paths, imgs, targets = list(zip(*batch))
-        targets = [boxes for boxes in targets if boxes is not None]
-        max_targets = max([targets[i].size(0) for i in range(len(targets))])
+        # 每个batch中，每个样本包含的目标数量要一致
+        paths, imgs, targets = list(zip(*batch))                                # targets的个数是batchsize的大小，深层嵌套的是一张图中有几个GT box
+        targets = [boxes for boxes in targets if boxes is not None]             # 这是在去掉无效框
+        max_targets = max([targets[i].size(0) for i in range(len(targets))])    # 这是找拥有最多GT box的那张图
         padded_targets = list()
 
-        for i, boxes in enumerate(targets):
+        for i, boxes in enumerate(targets):      # 这边pad每张图里面的GT box
             if boxes is not None:
+                # Add sample index to targets
                 boxes[:, 0] = i
                 absent = max_targets - boxes.size(0)
                 if absent > 0:
-                    boxes = torch.cat((boxes, torch.zeros((absent, 6))), 0)
+                    boxes = torch.cat((boxes, torch.zeros((absent, 6))), 0)    # torch.cat((A, B), 0)  列拼接，竖着拼
+                    # 这里对box进行拼接，本来一共有26个GT box，这里拼完就是[51, 6] == [box + 25, 6]，全0拼接
                 padded_targets.append(boxes)
-        targets = [boxes for boxes in padded_targets]
-        targets = torch.cat(targets, 0)
+        targets = [boxes for boxes in padded_targets]    # batchsize, len(boxes)*6
+        targets = torch.cat(targets, 0)                  # bacthsize*len(boxes), 6   依然竖着拼
         # select new image size every 10 batch
         if self.multiscale and self.batch_count % 10 == 0:
             self.img_size = random.choice(range(self.min_size, self.max_size + 1, 32))

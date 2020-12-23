@@ -76,7 +76,12 @@ if __name__ == "__main__":
 
     # Get dataloader   dataloader的大小就是一个batch里的图像向上取整之后的个数
     # len(dataloader) = math.ceil(len(img_files)/batch_size)
+    # https://blog.csdn.net/yojayc/article/details/109340277 dataloader和batchsize的关系
     dataset = ListDataset(train_path, img_size=opt.img_size, augment=True, multiscale=opt.multiscale_training)
+
+    # collate_fn:可以实现自定义的batch输出
+    # shuffle：设置为True的时候，每个epoch都会打乱数据集
+    # drop_last:告诉如何处理数据集长度除以batch_size的余下的数据。True就是抛弃，False就保留
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,

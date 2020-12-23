@@ -229,6 +229,7 @@ class YOLOLayer(nn.Module):
         self.anchor_h = self.scaled_anchors[:, 1:2].view((1, self.num_anchors, 1, 1))
 
     def forward(self, x, targets=None, img_dim=None):
+        # TODO yolo输出特征图解码(前向过程)
         # x.shape: b x 255 x 13 x 13 (anchor 6, 7, 8)
         # 这里的255=3*(4+1+classes)
 
@@ -304,17 +305,21 @@ class YOLOLayer(nn.Module):
         # 这里为什要乘以压缩(32, 16, 8)倍后的anchor而不是原anchor的wh,
         # 因为pred_boxes中的wh值也都是在压缩(32, 16, 8)倍的环境下预测出来的.
         # 主要是为了保持一致,虽然马上就又恢复到正常大小了 (下面cat内容)
+        # https://blog.csdn.net/qq_34199326/article/details/84109828   边界框的问题
         pred_boxes = FloatTensor(prediction[..., :4].shape)     # (b, 3, 13, 13, 4)
         pred_boxes[..., 0] = x.data + self.grid_x
         pred_boxes[..., 1] = y.data + self.grid_y
         pred_boxes[..., 2] = torch.exp(w.data) * self.anchor_w
         pred_boxes[..., 3] = torch.exp(h.data) * self.anchor_h
 
+        # torch.cat()函数
+        # C = torch.cat((A,B),0)  #按维数0拼接（竖着拼）
+        # C = torch.cat((A,B),1)  #按维数1拼接（横着拼）
         output = torch.cat(
             (   # * stride(=32对于13x13)，目的是将(0, 13)的bbox恢复到(0, 416)
                 # 这里的 -1 指的是 num_anchors*grid_size*grid_size
                 # 即最终output shape -> (batch_size,num_anchors*grid_size*grid_size,self.num_classes + 5)
-                # 这里的pred_boxes数据格式为 xywh在图片中的的相对大小 (0,1)
+                # 这里的pred_boxes数据格式为xywh在图片中的的相对大小 (0,1)
                 pred_boxes.view(num_samples, -1, 4) * self.stride,
                 pred_conf.view(num_samples, -1, 1),
                 pred_cls.view(num_samples, -1, self.num_classes),
@@ -322,6 +327,7 @@ class YOLOLayer(nn.Module):
             -1,
         )
 
+        # 如果是验证or测试的时候就到此为止了,直接返回预测的相关数据,否则返回loss进行更新梯度
         if targets is None:
             return output, 0
         else:

@@ -187,8 +187,8 @@ def get_batch_statistics(outputs, targets, iou_threshold):
 
 def bbox_wh_iou(wh1, wh2):
     '''
-    :param wh1: anchor
-    :param wh2: 网络出来的框的宽高
+    :param wh1:  聚类得到先验框的宽高
+    :param wh2:  target box
     :return: 1和所有的2的IOU值
     '''
     # wh1: anchor (2) // anchors: (3, 2)
@@ -438,8 +438,6 @@ def bbox_overlaps_giou(bboxes11, bboxes22):
     bboxes2 = torch.cat((torch.cat((bboxes22[:, 0] - bboxes22[:, 2] / 2, bboxes22[:, 1] - bboxes22[:, 3] / 2), 1),
                          torch.cat((bboxes22[:, 0] + bboxes22[:, 2] / 2, bboxes22[:, 1] + bboxes22[:, 3] / 2), 1)), 1)
 
-
-
     # bboxes1 = torch.from_numpy(np.array([bboxes11[:, 0] - bboxes11[:, 2] / 2, bboxes11[:, 1] - bboxes11[:, 3] / 2,
     #            bboxes11[:, 0] + bboxes11[:, 2] / 2, bboxes11[:, 1] + bboxes11[:, 3] / 2]))
     #
@@ -667,10 +665,9 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     :param pred_boxes: 预测目标的四个值xywh shape -> [batch_size, 3, grid_size, grid_size, 4] --> (b, 3, 13, 13, 4)
     :param pred_cls: 预测目标的所有分类概率 shape -> [batch_size, 3, grid_size, grid_size, classes_num] --> (b, 3, 13, 13, 80)
     :param target:  真实目标的相关信息(图片索引,class_id,x,y,w,h) shape -> [len(target), 6]
-    [len(target), 6] 第二个维度有6个值，分别为：box所在图片在本batch中的index，类别index，xc，yc，w，h
-    :param target:  label(0, 1)
+    [len(target), 6] 第二个维度有6个值，分别为：box所在图片在本batch中的index，类别index，xc，yc，w，h   label(0, 1)
     :param anchors: anchors  某一YOLO层下的anchor尺寸 shape -> [3, 2]
-    实例: tensor([[3.625, 2.8125], [4.875, 6.1875], [11.65625, 10.1875]])  (num_anchor, 2) -> (3, 2-)->aw, ah
+    实例: tensor([[3.625, 2.8125], [4.875, 6.1875], [11.65625, 10.1875]])  (num_anchor, 2) -> (3, 2)->aw, ah
     :param ignore_thres: iou忽略阈值,当iou超过这一值时,将noobj_mask设为 0
     TODO 这里的ignore_thres不是nms那种作用，这里是低于这个阈值的直接判0，高于这个值的判1，注意区分开！！！
     :param grid_size: 某一YOLO层下的grid尺寸
@@ -681,24 +678,25 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     FloatTensor = torch.cuda.FloatTensor if pred_boxes.is_cuda else torch.FloatTensor
 
     nB = pred_boxes.size(0)     # batch_size
-    nA = pred_boxes.size(1)     # anchor_size:3
+    nA = pred_boxes.size(1)     # anchor_size:3   每个特征图里有几个先验框
     nC = pred_cls.size(-1)      # classes size
-    nG = pred_boxes.size(2)     # drid cell size: 13
+    nG = pred_boxes.size(2)     # grid cell size: 13
 
     # Output tensors
     obj_mask = ByteTensor(nB, nA, nG, nG).fill_(0)
-    noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1)   # (b, c, 13, 13)  most candidates are noobj  给出来的参数比值1:100
+    noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1)   # (b, 3, 13, 13)  most candidates are noobj  给出来的参数比值1:100
     class_mask = FloatTensor(nB, nA, nG, nG).fill_(0)
     iou_scores = FloatTensor(nB, nA, nG, nG).fill_(0)
     tx = FloatTensor(nB, nA, nG, nG).fill_(0)
     ty = FloatTensor(nB, nA, nG, nG).fill_(0)
     tw = FloatTensor(nB, nA, nG, nG).fill_(0)
     th = FloatTensor(nB, nA, nG, nG).fill_(0)
-    tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
+    tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)    # (b, 3, 13, 13, 80)   class_mask 后面加上了classes
 
     target = target[target.sum(dim=1) != 0]
 
     # Convert to position relative to box
+    # 源target是padding后的0~1之间相对坐标,现在需要转换为以grid_size为单位下的坐标 (len(target),4) 方便下面计算box_iou
     target_boxes = target[:, 2:6] * nG      # (0, 1)->(0, 13) (n_boxes, 4)
     gxy = target_boxes[:, :2]               # (n_boxes, 2)
     gwh = target_boxes[:, 2:]               # (n_boxes, 2)
@@ -717,7 +715,8 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     # 属于第几个bbox：0, 1, 2, 3, 4
     # tensor([2, 0, 1, 2, 2])   属于第几个anchor
     # 获取每个真实box与3种anchors最大iou及anchor索引  (len(target),)
-    best_ious, best_n = ious.max(0)    # # 最大iou, 与target box交并比最大的anchor的index // [n_boxes], [n_boxes]
+    best_ious, best_n = ious.max(0)    # 最大iou, 与target box交并比最大的anchor的index // [n_boxes], [n_boxes]
+    # IOU比较这里是每张特征图上的值对比，是列对比，拿到最大的IOU对应的box及其索引值
     # Separate target values
     # 每个target所在图片在一个batch中的索引及目标种类id,注意这里的i_in_batch和target_labels可能会重复的,即一张图片中有两个同类目标！！！
     # target[:, :2]: (n_boxes, 2) -> img index, class index
@@ -727,7 +726,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     n_gpus = len(cfg.n_gpu.split(','))
     img_cnt_per_gpu = int(cfg.batch_size/n_gpus)
 
-    b = i_in_batch % img_cnt_per_gpu
+    b = i_in_batch % img_cnt_per_gpu    # 将那几张图分到第一块GPU，哪几张图分到第二张GPU卡..
     # gxy.t().shape = shape(gwh.t())=(2, n_boxes)
     # gxy.t()是为了把shape从n x 2 变成 2 x n。
     # gi, gj = gxy.long().t()，是通过.long的方式去除小数点，保留整数。
@@ -737,17 +736,18 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     gx, gy = gxy.t()          # gx = gxy.t()[0], gy = gxy.t()[1]
     gw, gh = gwh.t()          # gw = gwh.t()[0], gh = gwh.t()[1]
     gi, gj = gxy.long().t()   # .long()去除小数点
-    # Set masks
 
+    # Set masks
     gi[gi < 0] = 0
     gj[gj < 0] = 0
     gi[gi > nG - 1] = nG - 1
     gj[gj > nG - 1] = nG - 1
 
-    obj_mask[b, best_n, gj, gi] = 1    # target_boxes的类别框是1，其他为0
-    # 物体中心点落在的那个cell中的，与target object iou最大的那个3个anchor中的那1个，被设成1
-    # 其相应的noobj_mask被设成0
-    noobj_mask[b, best_n, gj, gi] = 0
+    # 目标掩膜 有真实目标的位置为1,否则默认为0
+    obj_mask[b, best_n, gj, gi] = 1
+    # TODO obj_mask表示有物体落在特征图中某一个cell的索引，所以在初始化的时候置0，如果有物体落在那个cell中，那个对应的位置会置1
+    noobj_mask[b, best_n, gj, gi] = 0   # 有目标    非目标掩膜 有真实目标的位置为0,否则默认为1,与obj_mask对立
+    # TODO noobj表示没有物体落在特征图中某一个cell的索引,所以在初始化的时候置1，如果没有有物体落在那个cell中，那个对应的位置会置0
     # 在obj_mask中,那些有target_boxes的区域都设置为1.同理在noobj_mask中,有target_boxes的区域都设置为0
     # obj_mask第一维度最大本应为8(如果batch_size=8),但是这里不出意外的话应该会超过8,因为target_box会在同一张图片中有多个.
     # 这里obj_mask中的值如何才能算作1呢,就是target_boxes的坐标向下取整后和哪个grid坐标相同,target_boxes就属于那个grid里.
@@ -762,22 +762,62 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     # E.g 假设有4个boxes，其所属图片在batch中的index为[0, 0, 1, 2], 即前2个boxes都属于本batch中的第0张图
     #     则b[0] = b[1] = 0 都应所属图片在batch中的index，即batch中的第几张图
     for i, anchor_ious in enumerate(ious.t()):
+        # noobj是没有物体落在特征图中某个cell的索引，所以在初始化的时候初始化为1
+        # 如果预测的IOU值过大，(大于阈值ignore_thres)时，那么可以认为这个cell是有物体的，要置0
+        # 正例除外(与ground truth计算后IOU最大的检测框，但是IOU小于阈值，仍为正例)
         noobj_mask[b[i], anchor_ious > ignore_thres, gj[i], gi[i]] = 0
 
+    # TODO 这部分写的注释有点多，来个总结：
+    # 预测框分为三种：正例(positive), 负例(negative), 忽略样本(ignore)
+
+    # 正例:任取一个ground truth，与4032个框全部计算IOU，IOU最大的预测框，即为正例。并且一个预测框，只能分配给一个ground truth。
+    # 例如第一个ground truth已经匹配了一个正例检测框，那么下一个ground truth，就在余下的4031个检测框中，寻找IOU最大的检测框作为正例。
+    # ground truth的先后顺序可忽略。正例产生置信度loss、检测框loss、类别loss。
+    # 预测框为对应的ground truth box标签(需要反向编码，使用真实的x、y、w、h计算出[公式])；类别标签对应类别为1，其余为0；置信度标签为1。
+
+    # 忽略样例：正例除外，与任意一个ground truth的IOU大于阈值（论文中使用0.5），则为忽略样例。忽略样例不产生任何loss。
+
+    # 负例：正例除外(与ground truth计算后IOU最大的检测框，但是IOU小于阈值，仍为正例)，
+    # 与全部ground truth的IOU都小于阈值（0.5），则为负例。负例只有置信度产生loss，置信度标签为0。
+
     # Coordinates
+    # 因为YOLO的核心思想就是物体的的中心点落在哪一个方格（cell）中，那个方格就预测该物体。
+    # 有人会问这里为什么没有使用sigmoid，如果你仔细看YoloLayer的前向传播（forward()），
+    # 在使用build_targets函数处理前，就已经使用sigmoid函数处理过了
+    # 真实值是gx，gy... 网络训练的是tx，ty...，所以这部分是这么变换的
     tx[b, best_n, gj, gi] = gx - gx.floor()        # x_offset (0, 1)
     ty[b, best_n, gj, gi] = gy - gy.floor()        # y_offset (0, 1)
     # Width and height
     tw[b, best_n, gj, gi] = torch.log(gw / anchors[best_n][:, 0] + 1e-16)
     th[b, best_n, gj, gi] = torch.log(gh / anchors[best_n][:, 1] + 1e-16)
     # One-hot encoding of label
-    tcls[b, best_n, gj, gi, target_labels] = 1
+    # 是表明第b张图片，使用第best_n个anchors来预测 哪一类（target_labels）物体
+    # 这里的target_labels可能是多个的。例如：狗和哈士奇，也就是多标签的意思
+    # 这是一个标签掩膜,有target的那一类target_label为1    one-hot编码方式
+    #         狗  飞机  船 哈士奇
+    #  box1   1    0   0    1
+    #  box2   0    1   0    0
+    tcls[b, best_n, gj, gi, target_labels] = 1   # 标签掩膜
     # Compute label correctness and iou at best anchor
     # 这两个是为了评价用，不参与实际回归
     # pred_cls与target_label匹配上了，则class_mask所对应的grid_xy为1，否则为0
-    # Compute label correctness and iou at best anchor
+    # 所有预测中类别预测正确则class_mask对应位置为1
+    # pred_cls[i_in_batch, best_ind, gj, gi] 是一个 (len(target),num_class)的数据.
+    # 即网络在target_box位置预测的所有种类(16)的概率值  shape  -> len(target),16
+    # pred_cls[i_in_batch, best_ind, gj, gi].argmax(-1) 代表网络在target_box位置预测的最大概率的类的索引(即max_class_index)
+    # pred_cls --> (b, 3, 13, 13, 80)
+    # class_mask 类掩膜 在target_boxes位置上预测的分类概率最大的那个class_id与target_boxes的class_id一致才会令该处的值为 1, 否则默认为 0
+    # argmax(-1)得到预测分类的值，然后判断和真实值是否相等，得到了正确分类的index
     class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
+    # pred_boxes[i_in_batch, best_ind, gj, gi]为(len(target),4)的tensor,这里只是计算网络在target_boxes位置预测的xywh与真实的xywh的iou
     iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False)
-
+    # tconf 这里进行float处理的原因是为了后面计算loss时和pred_box的float类型对齐
     tconf = obj_mask.float()   # target confidence
     return iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf
+
+    #  iou_scores --> 最好的那个anchor与target_box的IOU值
+    #  class_mask --> 分类正确的索引值
+    #  obj_mask --> 目标所在位置的最好anchor 值为1
+    #  noobj_mask -->
+    #  tx, ty, tw, th --> 对应的对于该大小的特征图的xywh目标值也就是我们需要拟合的值
+    #  tconf --> 目标置信度 --> 其实就是obj_mask换成了float
