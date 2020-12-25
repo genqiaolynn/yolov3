@@ -376,7 +376,7 @@ class YOLOLayer(nn.Module):
             # Total Loss
             total_loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls
 
-            # Metrics
+            # Metrics  一堆指标
             cls_acc = 100 * class_mask[obj_mask].mean()     # class_mask/obj_mask(b, 3, 13, 13) # 正确率
             conf_obj = pred_conf[obj_mask].mean()           # 有物体的平均置信度
             conf_noobj = pred_conf[noobj_mask].mean()       # 无物体的平均置信度
@@ -455,15 +455,15 @@ class Darknet(nn.Module):
             layer_outputs.append(x)
         yolo_outputs = to_cpu(torch.cat(yolo_outputs, 1))
         # TODO GPU
-        # if loss == 0:
-        #     loss_ = loss
-        # else:
-        #     loss_ = loss.type(torch.cuda.FloatTensor)
-        # yolo_outputs_gpu = yolo_outputs.cuda()
-        # return yolo_outputs_gpu if targets is None else (loss_, yolo_outputs_gpu)
+        if loss == 0:
+            loss_ = loss
+        else:
+            loss_ = loss.type(torch.cuda.FloatTensor)
+        yolo_outputs_gpu = yolo_outputs.cuda()
+        return yolo_outputs_gpu if targets is None else (loss_, yolo_outputs_gpu)
 
         # TODO CPU
-        return yolo_outputs if targets is None else (loss, yolo_outputs)
+        # return yolo_outputs if targets is None else (loss, yolo_outputs)
 
     def load_darknet_weights(self, weights_path):
         """Parses and loads the weights stored in 'weights_path'"""

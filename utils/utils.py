@@ -722,11 +722,11 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     # target[:, :2]: (n_boxes, 2) -> img index, class index
     # target[].t(): (2, n_boxes) -> b: img index in batch, torch.Size([n_boxes]),
     # target_labels: class index, torch.Size([n_boxes])
-    i_in_batch, target_labels = target[:, :2].long().t()
+    index_in_batch, target_labels = target[:, :2].long().t()
     n_gpus = len(cfg.n_gpu.split(','))
     img_cnt_per_gpu = int(cfg.batch_size/n_gpus)
 
-    b = i_in_batch % img_cnt_per_gpu    # 将那几张图分到第一块GPU，哪几张图分到第二张GPU卡..
+    b = index_in_batch % img_cnt_per_gpu    # 将那几张图分到第一块GPU，哪几张图分到第二张GPU卡..
     # gxy.t().shape = shape(gwh.t())=(2, n_boxes)
     # gxy.t()是为了把shape从n x 2 变成 2 x n。
     # gi, gj = gxy.long().t()，是通过.long的方式去除小数点，保留整数。
@@ -746,7 +746,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     # 目标掩膜 有真实目标的位置为1,否则默认为0
     obj_mask[b, best_n, gj, gi] = 1
     # TODO obj_mask表示有物体落在特征图中某一个cell的索引，所以在初始化的时候置0，如果有物体落在那个cell中，那个对应的位置会置1
-    noobj_mask[b, best_n, gj, gi] = 0   # 有目标    非目标掩膜 有真实目标的位置为0,否则默认为1,与obj_mask对立
+    noobj_mask[b, best_n, gj, gi] = 0     # 非目标掩膜 有真实目标的位置为0,否则默认为1,与obj_mask对立
     # TODO noobj表示没有物体落在特征图中某一个cell的索引,所以在初始化的时候置1，如果没有有物体落在那个cell中，那个对应的位置会置0
     # 在obj_mask中,那些有target_boxes的区域都设置为1.同理在noobj_mask中,有target_boxes的区域都设置为0
     # obj_mask第一维度最大本应为8(如果batch_size=8),但是这里不出意外的话应该会超过8,因为target_box会在同一张图片中有多个.
@@ -765,7 +765,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
         # noobj是没有物体落在特征图中某个cell的索引，所以在初始化的时候初始化为1
         # 如果预测的IOU值过大，(大于阈值ignore_thres)时，那么可以认为这个cell是有物体的，要置0
         # 正例除外(与ground truth计算后IOU最大的检测框，但是IOU小于阈值，仍为正例)
-        noobj_mask[b[i], anchor_ious > ignore_thres, gj[i], gi[i]] = 0
+        noobj_mask[b[i], anchor_ious > ignore_thres, gj[i], gi[i]] = 0   # 有目标
 
     # TODO 这部分写的注释有点多，来个总结：
     # 预测框分为三种：正例(positive), 负例(negative), 忽略样本(ignore)
@@ -782,7 +782,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
 
     # Coordinates
     # 因为YOLO的核心思想就是物体的的中心点落在哪一个方格（cell）中，那个方格就预测该物体。
-    # 有人会问这里为什么没有使用sigmoid，如果你仔细看YoloLayer的前向传播（forward()），
+    # 有人会问这里为什么没有使用sigmoid，如果你仔细看YoloLayer的前向传播(forward())，
     # 在使用build_targets函数处理前，就已经使用sigmoid函数处理过了
     # 真实值是gx，gy... 网络训练的是tx，ty...，所以这部分是这么变换的
     tx[b, best_n, gj, gi] = gx - gx.floor()        # x_offset (0, 1)
